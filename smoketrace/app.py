@@ -245,17 +245,42 @@ def gemini_client(key):
     return genai.Client(api_key=key)
 
 
+FALLBACK_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest",
+                   "gemini-2.5-flash-lite"]
+
+
 def gemini_text(prompt, image=None, as_json=False):
+    """Call Gemini with retries + automatic fallback to other models when one is
+    busy (503), rate-limited (429) or not available (404)."""
     if not GEMINI_KEY:
         return None
+    import time
     from google.genai import types
     client = gemini_client(GEMINI_KEY)
     contents = [image, prompt] if image is not None else [prompt]
     cfg = types.GenerateContentConfig(
         response_mime_type="application/json" if as_json else "text/plain",
         temperature=0.3)
-    resp = client.models.generate_content(model=GEMINI_MODEL, contents=contents, config=cfg)
-    return resp.text
+    models = [GEMINI_MODEL] + [m for m in FALLBACK_MODELS if m != GEMINI_MODEL]
+    last_err = None
+    for model in models:
+        for attempt in range(2):
+            try:
+                resp = client.models.generate_content(model=model, contents=contents, config=cfg)
+                if resp.text:
+                    return resp.text
+            except Exception as ex:
+                last_err = ex
+                msg = str(ex)
+                if any(c in msg for c in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED",
+                                          "overloaded", "high demand")):
+                    time.sleep(1.5 * (attempt + 1))
+                    continue          # retry same model once, then next model
+                if "404" in msg or "NOT_FOUND" in msg or "not found" in msg.lower():
+                    break             # model not available -> next model
+                raise                 # real error (bad key etc.)
+    raise RuntimeError("Gemini is busy right now. Please try again in a few seconds. "
+                       f"({str(last_err)[:120]})")
 
 
 PHOTO_PROMPT = """You are an air-pollution field inspector in India.
