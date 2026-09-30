@@ -376,7 +376,7 @@ with tab1:
                 f"that path — local sources (traffic, garbage burning, dust, industry) are the likely "
                 f"cause. Use <b>Photo check</b> to report them.</div>", unsafe_allow_html=True)
 
-        m = folium.Map(location=[LAT, LON], zoom_start=6, tiles="cartodbpositron")
+        m = folium.Map(location=[LAT, LON], zoom_start=6, tiles="OpenStreetMap")
         folium.PolyLine([(p[0], p[1]) for p in path], color="#1565c0", weight=4,
                         tooltip="Air path (last 24 h)").add_to(m)
         for p in path[::6][1:]:
@@ -397,6 +397,11 @@ with tab1:
             folium.Marker((rep["lat"], rep["lon"]), tooltip=f"Citizen report: {rep['source_type']}",
                           icon=folium.Icon(color="purple", icon="camera")).add_to(m)
         folium.Marker((LAT, LON), tooltip="You", icon=folium.Icon(color="blue", icon="home")).add_to(m)
+        pts = [(p[0], p[1]) for p in path]
+        if not mf.empty and summ["count"] > 0:
+            pts += list(zip(mf[mf["upwind"]].latitude, mf[mf["upwind"]].longitude))
+        lats, lons = [p[0] for p in pts], [p[1] for p in pts]
+        m.fit_bounds([[min(lats) - 0.3, min(lons) - 0.3], [max(lats) + 0.3, max(lons) + 0.3]])
         st_folium(m, height=480, use_container_width=True, returned_objects=[])
         st.caption("🔵 air path · 🔴 upwind fires (likely affecting you) · ⚪ other fires · 🟣 citizen reports")
         if not mf.empty and summ["count"] > 0:
@@ -453,7 +458,7 @@ with tab2:
     reps = load_reports()
     if reps:
         st.markdown(f"**Community hotspot map** — {len(reps)} report(s)")
-        hm = folium.Map(location=[LAT, LON], zoom_start=11, tiles="cartodbpositron")
+        hm = folium.Map(location=[LAT, LON], zoom_start=11, tiles="OpenStreetMap")
         for r in reps:
             folium.CircleMarker((r["lat"], r["lon"]), radius=6 + 2 * int(r.get("severity") or 1),
                                 color=SEV_COLOR.get(int(r.get("severity") or 1), "#999"), fill=True,
