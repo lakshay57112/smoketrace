@@ -289,13 +289,41 @@ def save_report(rep):
 
 SEV_COLOR = {1: "#9ccc65", 2: "#fbc02d", 3: "#fb8c00", 4: "#e53935", 5: "#6a1b9a"}
 
+# Clean, minimal base map (Esri Light Gray Canvas: free, no API key)
+ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/{}/MapServer/tile/{{z}}/{{y}}/{{x}}"
+
+
+def base_map(lat, lon, zoom=7):
+    m = folium.Map(location=[lat, lon], zoom_start=zoom, tiles=None,
+                   control_scale=False, prefer_canvas=True)
+    folium.TileLayer(ESRI.format("World_Light_Gray_Base"), attr="Esri",
+                     name="Light", max_zoom=16).add_to(m)
+    folium.TileLayer(ESRI.format("World_Light_Gray_Reference"), attr="Esri",
+                     name="Labels", overlay=True, control=False, max_zoom=16).add_to(m)
+    return m
+
+
+def you_are_here(m, lat, lon):
+    """Apple-style blue location dot with soft halo."""
+    folium.CircleMarker((lat, lon), radius=18, stroke=False, fill=True,
+                        fill_color="#0A84FF", fill_opacity=0.15).add_to(m)
+    folium.CircleMarker((lat, lon), radius=7, color="white", weight=3, fill=True,
+                        fill_color="#0A84FF", fill_opacity=1, tooltip="You").add_to(m)
+
 # ----------------------------------------------------------------------------
 # UI
 # ----------------------------------------------------------------------------
 st.markdown("""
 <style>
-.big {font-size: 1.15rem; line-height: 1.6;}
-.card {padding: 1rem 1.2rem; border-radius: 12px; border: 1px solid rgba(128,128,128,.25);}
+html, body, [class*="css"] {font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", sans-serif;}
+.big {font-size: 1.05rem; line-height: 1.6;}
+.card {padding: 1rem 1.25rem; border-radius: 16px; background: rgba(128,128,128,.08);
+       border: 1px solid rgba(128,128,128,.12); margin-bottom: .75rem;}
+.legend {font-size: .85rem; opacity: .8; margin-top: .25rem;}
+iframe {border-radius: 16px !important; box-shadow: 0 4px 24px rgba(0,0,0,.08);}
+div[data-testid="stMetric"] {background: rgba(128,128,128,.08); border-radius: 16px; padding: .75rem 1rem;}
+.leaflet-control-attribution {font-size: 9px !important; opacity: .6;}
+.leaflet-bar a {border-radius: 10px !important;}
 </style>""", unsafe_allow_html=True)
 
 st.title("🌫️ SmokeTrace")
@@ -376,34 +404,46 @@ with tab1:
                 f"that path — local sources (traffic, garbage burning, dust, industry) are the likely "
                 f"cause. Use <b>Photo check</b> to report them.</div>", unsafe_allow_html=True)
 
-        m = folium.Map(location=[LAT, LON], zoom_start=6, tiles="OpenStreetMap")
-        folium.PolyLine([(p[0], p[1]) for p in path], color="#1565c0", weight=4,
-                        tooltip="Air path (last 24 h)").add_to(m)
-        for p in path[::6][1:]:
-            folium.CircleMarker((p[0], p[1]), radius=3, color="#1565c0",
-                                tooltip=f"{p[2]} h ago").add_to(m)
+        m = base_map(LAT, LON)
         if not mf.empty:
             other = mf[~mf["upwind"]]
             up = mf[mf["upwind"]]
             for r in other.head(1500).itertuples():
-                folium.CircleMarker((r.latitude, r.longitude), radius=2, color="#bdbdbd",
-                                    fill=True, weight=0, fill_opacity=0.6).add_to(m)
+                folium.CircleMarker((r.latitude, r.longitude), radius=2, stroke=False,
+                                    fill=True, fill_color="#8E8E93", fill_opacity=0.35).add_to(m)
+        # air path: soft glow + crisp line
+        line = [(p[0], p[1]) for p in path]
+        folium.PolyLine(line, color="#0A84FF", weight=10, opacity=0.15).add_to(m)
+        folium.PolyLine(line, color="#0A84FF", weight=3, opacity=0.9,
+                        tooltip="Air path (last 24 h)").add_to(m)
+        for p in path[::6][1:]:
+            folium.CircleMarker((p[0], p[1]), radius=4, color="#0A84FF", weight=2, fill=True,
+                                fill_color="white", fill_opacity=1,
+                                tooltip=f"{p[2]} h ago").add_to(m)
+        if not mf.empty:
             for r in up.itertuples():
-                folium.CircleMarker((r.latitude, r.longitude), radius=4 + min(r.frp, 50) / 10,
-                                    color="#d32f2f", fill=True, fill_opacity=0.8,
-                                    tooltip=f"Fire {r.acq_date} {int(r.acq_time):04d} UTC · "
-                                            f"{r.frp:.0f} MW · {r.dist_city:.0f} km away").add_to(m)
+                rad = 4 + min(r.frp, 60) / 12
+                folium.CircleMarker((r.latitude, r.longitude), radius=rad * 2.2, stroke=False,
+                                    fill=True, fill_color="#FF453A", fill_opacity=0.15).add_to(m)
+                folium.CircleMarker((r.latitude, r.longitude), radius=rad, color="white", weight=1.5,
+                                    fill=True, fill_color="#FF453A", fill_opacity=0.95,
+                                    tooltip=f"Fire · {r.frp:.0f} MW · {r.dist_city:.0f} km away · "
+                                            f"{r.acq_date}").add_to(m)
         for rep in load_reports():
-            folium.Marker((rep["lat"], rep["lon"]), tooltip=f"Citizen report: {rep['source_type']}",
-                          icon=folium.Icon(color="purple", icon="camera")).add_to(m)
-        folium.Marker((LAT, LON), tooltip="You", icon=folium.Icon(color="blue", icon="home")).add_to(m)
+            folium.CircleMarker((rep["lat"], rep["lon"]), radius=6, color="white", weight=2,
+                                fill=True, fill_color="#BF5AF2", fill_opacity=1,
+                                tooltip=f"Citizen report: {rep['source_type']}").add_to(m)
+        you_are_here(m, LAT, LON)
         pts = [(p[0], p[1]) for p in path]
         if not mf.empty and summ["count"] > 0:
             pts += list(zip(mf[mf["upwind"]].latitude, mf[mf["upwind"]].longitude))
         lats, lons = [p[0] for p in pts], [p[1] for p in pts]
         m.fit_bounds([[min(lats) - 0.3, min(lons) - 0.3], [max(lats) + 0.3, max(lons) + 0.3]])
         st_folium(m, height=480, use_container_width=True, returned_objects=[])
-        st.caption("🔵 air path · 🔴 upwind fires (likely affecting you) · ⚪ other fires · 🟣 citizen reports")
+        st.markdown("<div class='legend'><span style='color:#0A84FF'>●</span> You &amp; air path &nbsp;&nbsp;"
+                    "<span style='color:#FF453A'>●</span> Fires affecting you &nbsp;&nbsp;"
+                    "<span style='color:#8E8E93'>●</span> Other fires &nbsp;&nbsp;"
+                    "<span style='color:#BF5AF2'>●</span> Citizen reports</div>", unsafe_allow_html=True)
         if not mf.empty and summ["count"] > 0:
             with st.expander("Upwind fire list"):
                 st.dataframe(mf[mf["upwind"]].sort_values("frp", ascending=False)[
@@ -458,11 +498,13 @@ with tab2:
     reps = load_reports()
     if reps:
         st.markdown(f"**Community hotspot map** — {len(reps)} report(s)")
-        hm = folium.Map(location=[LAT, LON], zoom_start=11, tiles="OpenStreetMap")
+        hm = base_map(LAT, LON, zoom=11)
+        you_are_here(hm, LAT, LON)
         for r in reps:
-            folium.CircleMarker((r["lat"], r["lon"]), radius=6 + 2 * int(r.get("severity") or 1),
-                                color=SEV_COLOR.get(int(r.get("severity") or 1), "#999"), fill=True,
-                                fill_opacity=0.7,
+            folium.CircleMarker((r["lat"], r["lon"]), radius=5 + 1.5 * int(r.get("severity") or 1),
+                                color="white", weight=2, fill=True,
+                                fill_color=SEV_COLOR.get(int(r.get("severity") or 1), "#999"),
+                                fill_opacity=0.95,
                                 tooltip=f"{r['source_type']} · sev {r.get('severity')} · {r['time']}").add_to(hm)
         st_folium(hm, height=380, use_container_width=True, returned_objects=[], key="hotspots")
 
